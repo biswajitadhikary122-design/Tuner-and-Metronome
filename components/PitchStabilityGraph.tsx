@@ -1,135 +1,181 @@
 import React, { useRef, useEffect } from 'react';
-import type { NoteDetails } from '../types';
-import { useSpring, animated } from '@react-spring/web';
+import type { NoteDetails, TuningSettings } from '../types';
 
 interface PitchStabilityGraphProps {
   note: NoteDetails | null;
-  stabilityScore: number;
-  feedback: string;
+  settings: TuningSettings;
 }
 
-const HISTORY_SIZE = 200; // Number of data points to show on the graph
+type TuningState = 'sharp' | 'flat' | 'in-tune';
+type HistoryPoint = { cents: number; state: TuningState } | { break: true };
 
-export const PitchStabilityGraph: React.FC<PitchStabilityGraphProps> = ({ note, stabilityScore, feedback }) => {
+const HISTORY_SIZE = 300;
+const CENTS_RANGE = 35; // y-axis will be +/- 35 cents
+
+export const PitchStabilityGraph: React.FC<PitchStabilityGraphProps> = ({ note, settings }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const centsHistoryRef = useRef<number[]>([]);
+  const historyRef = useRef<HistoryPoint[]>([]);
   const animationFrameIdRef = useRef<number | null>(null);
-  const prevNoteWasNull = useRef(!note);
-
-  const { score } = useSpring({
-    score: stabilityScore,
-    config: { mass: 1, tension: 120, friction: 40 },
-  });
+  const lastNoteNameRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // If transitioning from no note to a note, clear history to start fresh.
-    if (note && prevNoteWasNull.current) {
-      centsHistoryRef.current = [];
-    }
-    prevNoteWasNull.current = !note;
-
-    // If there is no note, stop the animation. The cleanup from the last render
-    // will have cancelled the animation frame, freezing the graph.
-    if (!note) {
-      return;
-    }
-
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Resize canvas to match display size for high-res rendering
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
-    }
-
+    const isDark = settings.darkMode;
+    const COLORS = {
+      sharp: '#d946ef', // fuchsia-500
+      inTune: '#10b981', // emerald-500
+      flat: '#ef4444', // red-500
+      grid: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+      text: isDark ? '#94a3b8' : '#64748b', // slate-400 / slate-500
+    };
 
     const draw = () => {
-        const { width, height } = canvas;
-        const scaledWidth = width / dpr;
-        const scaledHeight = height / dpr;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+      
+      const width = rect.width;
+      const height = rect.height;
+      const yCenter = height / 2;
+      const pixelsPerCent = (height / 2) / CENTS_RANGE;
 
-        // Add new data point (note is guaranteed to be non-null here)
-        centsHistoryRef.current.push(note.cents);
-        if (centsHistoryRef.current.length > HISTORY_SIZE) {
-            centsHistoryRef.current.shift();
+      // --- Update History ---
+      const currentNoteId = note ? `${note.name}${note.octave}` : null;
+      if (note && currentNoteId) {
+        let currentState: TuningState;
+        if (note.cents > 10) currentState = 'sharp';
+        else if (note.cents < -10) currentState = 'flat';
+        else currentState = 'in-tune';
+        
+        if (lastNoteNameRef.current !== currentNoteId) {
+             historyRef.current.push({ break: true });
         }
+        
+        historyRef.current.push({ cents: note.cents, state: currentState });
+        lastNoteNameRef.current = currentNoteId;
+      } else {
+        lastNoteNameRef.current = null;
+      }
+      
+      if (historyRef.current.length > HISTORY_SIZE) {
+        historyRef.current.shift();
+      }
 
-        // Clear canvas with a dark background
-        ctx.clearRect(0, 0, width, height);
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; // Tailwind slate-900 with alpha
-        ctx.fillRect(0, 0, scaledWidth, scaledHeight);
+      // --- Drawing ---
+      ctx.clearRect(0, 0, width, height);
 
-        // --- Draw Grid ---
-        ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)'; // slate-700
-        ctx.lineWidth = 1;
-        // Center line (0 cents)
+      // Draw Grid & Labels
+      ctx.strokeStyle = COLORS.grid;
+      ctx.lineWidth = 1;
+      ctx.font = `10px sans-serif`;
+      ctx.fillStyle = COLORS.text;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      [-30, -20, -10, 10, 20, 30].forEach(cents => {
+        const y = yCenter - cents * pixelsPerCent;
         ctx.beginPath();
-        ctx.moveTo(0, scaledHeight / 2);
-        ctx.lineTo(scaledWidth, scaledHeight / 2);
-        ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)'; // green-500
+        ctx.moveTo(20, y);
+        ctx.lineTo(width, y);
         ctx.stroke();
         
-        // Cents lines (+/- 25)
-        ctx.beginPath();
-        ctx.moveTo(0, scaledHeight / 4);
-        ctx.lineTo(scaledWidth, scaledHeight / 4);
-        ctx.moveTo(0, scaledHeight * 3 / 4);
-        ctx.lineTo(scaledWidth, scaledHeight * 3 / 4);
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)'; // red-500
-        ctx.setLineDash([5, 5]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-
-        // --- Draw Pitch Line ---
-        if (centsHistoryRef.current.length > 1) {
-            // Gradient for the line color
-            const gradient = ctx.createLinearGradient(0, 0, 0, scaledHeight);
-            gradient.addColorStop(0, '#ef4444');    // red-500
-            gradient.addColorStop(0.25, '#facc15'); // yellow-400
-            gradient.addColorStop(0.5, '#22c55e');  // green-500
-            gradient.addColorStop(0.75, '#facc15');
-            gradient.addColorStop(1, '#ef4444');
-            ctx.strokeStyle = gradient;
-
-            ctx.lineWidth = 2.5;
-            ctx.shadowColor = 'rgba(74, 222, 128, 0.7)'; // green-400
-            ctx.shadowBlur = 10;
-            
-            ctx.beginPath();
-            
-            const step = scaledWidth / HISTORY_SIZE;
-            
-            for (let i = 0; i < centsHistoryRef.current.length; i++) {
-                const cents = Math.max(-50, Math.min(50, centsHistoryRef.current[i]));
-                const y = (scaledHeight / 2) - (cents / 50) * (scaledHeight / 2);
-                const x = i * step;
-
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    // Use quadratic curve for smoothing
-                    const prevX = (i - 1) * step;
-                    const prevY = (scaledHeight / 2) - (Math.max(-50, Math.min(50, centsHistoryRef.current[i - 1])) / 50) * (scaledHeight / 2);
-                    const cpX = (prevX + x) / 2;
-                    ctx.quadraticCurveTo(prevX, prevY, cpX, y);
-                }
-            }
-            ctx.stroke();
-            
-            // Reset shadow for other elements
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
+        let textY = y - 6; // Default to be above the line
+        if (cents >= 10) {
+          textY = y + 6; // Move positive numbers down, below the line
         }
 
-        animationFrameIdRef.current = requestAnimationFrame(draw);
+        ctx.fillText(cents > 0 ? `+${cents}` : String(cents), width - 5, textY);
+      });
+      
+      // In-tune zone
+      const tolerancePixels = 10 * pixelsPerCent;
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
+      ctx.fillRect(0, yCenter - tolerancePixels, width, tolerancePixels * 2);
+      
+      // Center line
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(0, yCenter);
+      ctx.lineTo(width, yCenter);
+      ctx.stroke();
+      
+      // --- Draw Pitch History Trace ---
+      const step = width / HISTORY_SIZE;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      let currentSegment: { points: {x: number, y: number}[], state: TuningState } | null = null;
+      const segments: typeof currentSegment[] = [];
+
+      for (let i = 0; i < historyRef.current.length; i++) {
+          const point = historyRef.current[i];
+          if ('break' in point) {
+              if (currentSegment) segments.push(currentSegment);
+              currentSegment = null;
+              continue;
+          }
+          const p = { x: i * step, y: yCenter - point.cents * pixelsPerCent };
+          if (!currentSegment || currentSegment.state !== point.state) {
+              if (currentSegment) segments.push(currentSegment);
+              currentSegment = { points: [p], state: point.state };
+          } else {
+              currentSegment.points.push(p);
+          }
+      }
+      if (currentSegment) segments.push(currentSegment);
+
+      segments.forEach(seg => {
+          if (!seg || seg.points.length < 2) return;
+          const color = COLORS[seg.state];
+          ctx.strokeStyle = color;
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.moveTo(seg.points[0].x, seg.points[0].y);
+          for (let i = 0; i < seg.points.length - 1; i++) {
+              const p1 = seg.points[i];
+              const p2 = seg.points[i+1];
+              const midPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+              ctx.quadraticCurveTo(p1.x, p1.y, midPoint.x, midPoint.y);
+          }
+          const last = seg.points[seg.points.length - 1];
+          const secondLast = seg.points[seg.points.length - 2];
+          ctx.quadraticCurveTo(secondLast.x, secondLast.y, last.x, last.y);
+          ctx.stroke();
+      });
+      ctx.shadowBlur = 0;
+
+      // Draw "Now" cursor
+      const lastDataPoint = historyRef.current[historyRef.current.length - 1];
+      if (lastDataPoint && !('break' in lastDataPoint)) {
+          const i = historyRef.current.length - 1;
+          const x = i * step;
+          const y = yCenter - lastDataPoint.cents * pixelsPerCent;
+          const color = COLORS[lastDataPoint.state];
+          
+          const pulseRadius = 6 + Math.sin(performance.now() / 200) * 1.5;
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.3;
+          ctx.beginPath();
+          ctx.arc(x, y, pulseRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+
+          ctx.fillStyle = 'white';
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+      }
+
+      animationFrameIdRef.current = requestAnimationFrame(draw);
     };
 
     draw();
@@ -137,30 +183,16 @@ export const PitchStabilityGraph: React.FC<PitchStabilityGraphProps> = ({ note, 
     return () => {
       if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current);
-        animationFrameIdRef.current = null;
       }
     };
-  }, [note]);
+  }, [note, settings]);
 
   return (
-    <div className="w-full flex flex-col items-center gap-4">
-      <div className="w-full h-24 bg-slate-900 rounded-lg shadow-inner overflow-hidden relative">
-        <canvas ref={canvasRef} className="w-full h-full" />
-        <div className="absolute top-2 left-3 text-white font-mono text-sm opacity-70">
-            <p>±50 cents</p>
+    <div className="w-full h-40 relative flex flex-col p-4">
+        <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2">Pitch Stability</h3>
+        <div className="flex-grow relative">
+            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
         </div>
-      </div>
-      <div className="flex justify-between items-center w-full px-2">
-        <div className="text-left">
-            <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-widest">Stability</p>
-            <animated.p className="text-2xl font-mono text-cyan-600 dark:text-cyan-300">
-                {score.to(s => `${s.toFixed(0)}%`)}
-            </animated.p>
-        </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 font-semibold text-center flex-1 min-h-[2.5rem]">
-            {feedback}
-        </p>
-      </div>
     </div>
   );
 };

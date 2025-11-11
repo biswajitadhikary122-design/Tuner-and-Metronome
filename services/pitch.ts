@@ -1,15 +1,14 @@
-
 import type { NoteDetails, TuningSettings } from '../types';
-import { NOTE_NAMES_SHARP, NOTE_NAMES_FLAT, NOTATION_MAPS } from '../constants';
+import { NOTE_NAMES_SHARP, NOTE_NAMES_FLAT, NOTATION_MAPS } from './musicConstants';
 
 export const C4_MIDI = 60;
 export const A4_MIDI = 69;
 
 /**
- * Applies a Hann window to the buffer.
+ * Applies a Hann window to the buffer. This function modifies the buffer in place.
  * @param buffer The input audio buffer.
  */
-function applyHannWindow(buffer: Float32Array): void {
+export function applyHannWindow(buffer: Float32Array): void {
   for (let i = 0; i < buffer.length; i++) {
     buffer[i] *= 0.5 * (1 - Math.cos((2 * Math.PI * i) / (buffer.length - 1)));
   }
@@ -53,7 +52,7 @@ export function findPitchFromAutocorrelation(buffer: Float32Array, sampleRate: n
   }
 
   // 3. Absolute thresholding to find the fundamental period
-  const threshold = 0.15; // Standard YIN threshold, slightly adjusted for real-world noise
+  const threshold = 0.12; // Lowered threshold for more sensitivity to faint/noisy signals
   let bestPeriod = -1;
   let minDiff = 1;
 
@@ -207,13 +206,25 @@ export function frequencyToNoteDetails(frequency: number, settings: TuningSettin
  * @returns The frequency in Hz, or -1 if the note is invalid.
  */
 export function noteToFrequency(noteName: string, octave: number, settings: TuningSettings): number {
-  const { a4, transposition, notationSystem } = settings;
+  const { a4, transposition = 0, notationSystem = 'English' } = settings;
   const displayNames = NOTATION_MAPS[notationSystem];
   
-  let noteIndex = displayNames.indexOf(noteName);
-  
+  let noteIndex = -1;
+
+  // Primary lookup in the current notation system
+  noteIndex = displayNames.indexOf(noteName);
+
+  // Fallback 1: if not found, check if an English name was passed.
+  // This makes components like the Piano keyboard work regardless of current notation.
   if (noteIndex === -1) {
-    // Fallback for complex names like Di/Ra
+    noteIndex = NOTE_NAMES_SHARP.indexOf(noteName);
+  }
+  if (noteIndex === -1) {
+    noteIndex = NOTE_NAMES_FLAT.indexOf(noteName);
+  }
+  
+  // Fallback 2: The original `.includes` check, as a last resort for complex names like "Di/Ra" if "Di" was passed.
+  if (noteIndex === -1) {
     for (let i = 0; i < displayNames.length; i++) {
         if (displayNames[i].includes(noteName)) {
             noteIndex = i;
@@ -221,9 +232,9 @@ export function noteToFrequency(noteName: string, octave: number, settings: Tuni
         }
     }
   }
-  
+
   if (noteIndex === -1) {
-    return -1; // Invalid note name
+    return -1; // Note not found in any system
   }
 
   // Calculate the MIDI number of the *displayed* note.

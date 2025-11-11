@@ -28,16 +28,16 @@ export const SoundSelectionModal: React.FC<SoundSelectionModalProps> = ({ isOpen
         className="fixed inset-0 bg-black/60 z-40 animate-fade-in-fast"
         onClick={onClose}
       ></div>
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-sm animate-fade-in-up">
-        <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border border-gray-300/50 dark:border-gray-700/50 rounded-xl shadow-2xl p-6">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border border-gray-300/50 dark:border-gray-700/50 rounded-xl shadow-2xl p-6 w-full max-w-sm animate-fade-in-up pointer-events-auto">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200">Select Sound</h2>
+            <h2 className="text-xl font-semibold text-black dark:text-white">Select Sound</h2>
             <button
               onClick={onClose}
               className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10"
               aria-label="Close"
             >
-              <CloseIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              <CloseIcon className="w-5 h-5 text-black dark:text-white" />
             </button>
           </div>
           <div className="grid grid-cols-3 gap-3 max-h-64 overflow-y-auto">
@@ -48,15 +48,15 @@ export const SoundSelectionModal: React.FC<SoundSelectionModalProps> = ({ isOpen
                   className={`w-full aspect-square rounded-lg text-lg font-semibold border-2 transition-all duration-200 flex justify-center items-center active:scale-95
                     ${
                       currentSound === sound
-                        ? 'bg-cyan-500/20 dark:bg-cyan-500/30 border-cyan-500 dark:border-cyan-400 text-cyan-700 dark:text-cyan-300'
-                        : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200/80 dark:hover:bg-gray-700/50'
+                        ? 'bg-teal-500/20 dark:bg-teal-500/30 border-teal-500 dark:border-teal-400 text-teal-700 dark:text-teal-300'
+                        : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-black dark:text-white hover:bg-gray-200/80 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   {sound}
                 </button>
                 <button 
                   onClick={() => handleSelect(sound)}
-                  className="w-full text-center text-xs text-cyan-600 dark:text-cyan-400 font-semibold hover:underline"
+                  className="w-full text-center text-xs text-teal-600 dark:text-teal-400 font-semibold hover:underline"
                 >
                   Select
                 </button>

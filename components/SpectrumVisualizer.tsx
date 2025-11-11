@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect } from 'react';
 
 interface SpectrumVisualizerProps {
@@ -25,9 +24,9 @@ export const SpectrumVisualizer: React.FC<SpectrumVisualizerProps> = ({ spectrum
     
     // Create a gradient for the bars
     const gradient = context.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#f0abfc'); // fuchsia-300
-    gradient.addColorStop(0.5, '#67e8f9'); // cyan-300
-    gradient.addColorStop(1, '#0e7490'); // cyan-700
+    gradient.addColorStop(0, '#a5b4fc'); // indigo-300
+    gradient.addColorStop(0.5, '#5eead4'); // teal-300
+    gradient.addColorStop(1, '#0d9488'); // teal-700
     
     context.fillStyle = gradient;
 
@@ -47,9 +46,9 @@ export const SpectrumVisualizer: React.FC<SpectrumVisualizerProps> = ({ spectrum
   }, [spectrum]);
 
   return (
-    <div className="bg-white/70 dark:bg-slate-800/40 backdrop-blur-xl border border-slate-200/70 dark:border-slate-700/50 rounded-lg p-2">
+    <div className="bg-white/80 dark:bg-slate-900/70 backdrop-blur-2xl border border-slate-200/70 dark:border-slate-700/50 rounded-lg p-2 shadow-inner">
         <canvas ref={canvasRef} width="340" height="100" className="w-full h-24 rounded"></canvas>
-        <p className="text-center text-xs text-slate-600 dark:text-slate-500 mt-1">Frequency Spectrum (FFT)</p>
+        <p className="text-center text-xs text-black/70 dark:text-white/70 mt-1">Frequency Spectrum (FFT)</p>
     </div>
   );
 };

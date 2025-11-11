@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect } from 'react';
 
 interface WaveformVisualizerProps {
@@ -19,7 +18,7 @@ export const WaveformVisualizer: React.FC<WaveformVisualizerProps> = ({ waveform
     context.clearRect(0, 0, width, height);
 
     context.lineWidth = 2;
-    context.strokeStyle = '#a855f7'; // purple-500
+    context.strokeStyle = '#6366f1'; // indigo-500
 
     context.beginPath();
 
@@ -46,9 +45,9 @@ export const WaveformVisualizer: React.FC<WaveformVisualizerProps> = ({ waveform
   }, [waveform]);
 
   return (
-    <div className="bg-white/70 dark:bg-slate-800/40 backdrop-blur-xl border border-slate-200/70 dark:border-slate-700/50 rounded-lg p-2">
+    <div className="bg-white/80 dark:bg-slate-900/70 backdrop-blur-2xl border border-slate-200/70 dark:border-slate-700/50 rounded-lg p-2 shadow-inner">
         <canvas ref={canvasRef} width="340" height="100" className="w-full h-24 rounded"></canvas>
-        <p className="text-center text-xs text-slate-600 dark:text-slate-500 mt-1">Audio Waveform (Time Domain)</p>
+        <p className="text-center text-xs text-black/70 dark:text-white/70 mt-1">Audio Waveform (Time Domain)</p>
     </div>
   );
 };

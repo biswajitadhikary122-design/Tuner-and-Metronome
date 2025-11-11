@@ -1,8 +1,9 @@
 
-import React from 'react';
-import type { TuningSettings, InstrumentPreset, Temperament, NotationSystem } from '../types';
+import React, { useEffect, useRef } from 'react';
+import type { TuningSettings, InstrumentPreset, Temperament } from '../types';
 import { CloseIcon, ChevronDownIcon } from './Icons';
 import { PRESET_CATEGORIES } from '../constants';
+import { TranspositionSettings } from './TranspositionSettings';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -12,9 +13,7 @@ interface SettingsPanelProps {
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, settings, onSettingsChange }) => {
-  const handleA4Change = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onSettingsChange({ ...settings, a4: parseFloat(e.target.value) });
-  };
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleSharpFlatToggle = () => {
     onSettingsChange({ ...settings, useSharps: !settings.useSharps });
@@ -32,32 +31,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, s
     onSettingsChange({ ...settings, debugMode: !settings.debugMode });
   }
 
-  const handleWaveformToggle = () => {
-    onSettingsChange({ ...settings, debugWaveform: !settings.debugWaveform });
-  }
-
-  const handleTimbreVisualizerToggle = () => {
-    onSettingsChange({ ...settings, timbreVisualizer: !settings.timbreVisualizer });
-  }
-
-  const handleVoiceFeedbackToggle = () => {
-    onSettingsChange({ ...settings, voiceFeedback: !settings.voiceFeedback });
-  };
-
-  const handleTranspositionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onSettingsChange({ ...settings, transposition: parseInt(e.target.value, 10) });
-  };
-  const handleTemperamentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      onSettingsChange({ ...settings, temperament: e.target.value as Temperament });
-  };
-  const handleNotationSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      onSettingsChange({ ...settings, notationSystem: e.target.value as NotationSystem });
-  };
   const handleToleranceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       onSettingsChange({ ...settings, tuningTolerance: parseFloat(e.target.value) });
   };
   const handleTargetFrequencyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onSettingsChange({ ...settings, targetFrequency: parseFloat(e.target.value) });
+  };
+  const handleDebugWaveformToggle = () => {
+      onSettingsChange({ ...settings, debugWaveform: !settings.debugWaveform });
   };
 
 
@@ -68,271 +49,176 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, s
         onClick={onClose}
       ></div>
       <div
-        className={`fixed top-0 right-0 h-full w-full max-w-sm bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-xl border-l border-slate-200/80 dark:border-slate-700/50 z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed top-0 right-0 h-full w-full max-w-md bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl border-l border-slate-200/80 dark:border-slate-800 shadow-2xl z-50 transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
       >
-        <div className="p-6 h-full flex flex-col">
-          <div className="flex justify-between items-center mb-8">
-            <h2 className="text-2xl font-semibold text-slate-800 dark:text-slate-200">Settings</h2>
+        <div className="flex flex-col h-full">
+          <header className="flex items-center justify-between p-5 border-b border-slate-200/80 dark:border-slate-800 flex-shrink-0 bg-white/50 dark:bg-slate-900/50">
+            <h2 id="settings-title" className="text-2xl font-bold text-black dark:text-white">Settings</h2>
             <button
               onClick={onClose}
-              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
               aria-label="Close settings"
             >
-              <CloseIcon className="w-6 h-6 text-slate-600 dark:text-slate-400" />
+              <CloseIcon className="w-6 h-6 text-black dark:text-white" />
             </button>
-          </div>
+          </header>
 
-          <div className="space-y-8 flex-grow overflow-y-auto pr-2">
-            {/* Instrument Preset */}
-            <div>
-              <label htmlFor="instrument-preset-select" className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Instrument Profile</label>
-              <div className="relative">
-                  <select
-                    id="instrument-preset-select"
-                    value={settings.preset}
-                    onChange={(e) => handlePresetChange(e.target.value as InstrumentPreset)}
-                    className="w-full p-3 rounded-lg font-semibold border transition-colors duration-200 appearance-none
-                               bg-white/60 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700 text-slate-800 dark:text-slate-200
-                               focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                  >
-                    {PRESET_CATEGORIES.map(({ category, instruments }) => (
-                        <optgroup key={category} label={category}>
-                            {instruments.map((preset) => (
-                                <option key={preset} value={preset}>
-                                    {preset}
-                                </option>
-                            ))}
-                        </optgroup>
-                    ))}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-600 dark:text-slate-400">
-                    <ChevronDownIcon className="w-5 h-5" />
-                  </div>
-              </div>
-            </div>
+          <div className="flex-grow p-5 overflow-y-auto space-y-8 text-black dark:text-white custom-scrollbar" ref={scrollRef}>
+            
+            {/* Main Transposition Interface */}
+            <section className="-mx-2">
+                <TranspositionSettings settings={settings} onSettingsChange={onSettingsChange} onClose={onClose} />
+            </section>
 
-             {/* Target Frequency (Conditional) */}
-             {settings.preset === 'Hz (Manual)' && (
+            <hr className="border-slate-200 dark:border-slate-800" />
+
+            {/* Tuning Standard */}
+            <section className="space-y-4">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Instrument Range</label>
+                
+                {/* Tuning Preset */}
                 <div>
-                    <label htmlFor="target-freq-slider" className="block text-lg text-slate-700 dark:text-slate-300 mb-2">Target Frequency</label>
-                    <div className="flex items-center gap-4">
+                    <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">Optimization Preset</label>
+                    <div className="relative">
+                        <select
+                            value={settings.preset}
+                            onChange={(e) => handlePresetChange(e.target.value as InstrumentPreset)}
+                            className="w-full p-3 rounded-xl font-semibold border transition-colors duration-200 appearance-none
+                                       bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700
+                                       focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        >
+                            {PRESET_CATEGORIES.map(({ category, instruments }) => (
+                                <optgroup key={category} label={category}>
+                                    {instruments.map((preset) => (
+                                        <option key={preset} value={preset}>
+                                            {preset}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            ))}
+                        </select>
+                         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                            <ChevronDownIcon className="w-5 h-5" />
+                        </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 px-1">Optimizes pitch detection range for specific instruments.</p>
+                </div>
+                
+                {/* Hz (Manual) Mode Setting */}
+                {settings.preset === 'Hz (Manual)' && (
+                    <div className="p-4 bg-teal-500/10 border border-teal-500/20 rounded-xl">
+                        <label htmlFor="targetFrequency" className="block text-sm font-bold text-teal-800 dark:text-teal-300 mb-2">
+                            Target Frequency ({settings.targetFrequency?.toFixed(2) ?? '440.00'} Hz)
+                        </label>
                         <input
-                        id="target-freq-slider"
-                        type="range"
-                        min="20"
-                        max="5000"
-                        step="0.5"
-                        value={settings.targetFrequency || 440}
-                        onChange={handleTargetFrequencyChange}
-                        className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                        />
-                         <input
-                            type="number"
-                            value={settings.targetFrequency?.toFixed(1) || '440.0'}
+                            id="targetFrequency"
+                            type="range"
+                            min="20"
+                            max="5000"
+                            step="0.1"
+                            value={settings.targetFrequency || 440}
                             onChange={handleTargetFrequencyChange}
-                            className="font-mono text-cyan-600 dark:text-cyan-400 w-24 text-center bg-transparent p-1 rounded-md border border-slate-300 dark:border-slate-700"
+                            className="w-full h-2 bg-teal-200 dark:bg-teal-900 rounded-lg appearance-none cursor-pointer accent-teal-600 dark:accent-teal-400"
                         />
                     </div>
-                    <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Set the exact frequency to tune against.</p>
+                )}
+            </section>
+
+            <hr className="border-slate-200 dark:border-slate-800" />
+
+            {/* Display Options */}
+            <section className="space-y-4">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Display Options</label>
+                <div className="grid grid-cols-1 gap-4">
+                     <div>
+                        <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">Accidentals Preference</label>
+                        <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700">
+                            <button
+                                onClick={handleSharpFlatToggle}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!settings.useSharps ? 'bg-white dark:bg-slate-600 shadow-sm text-black dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                            >
+                                ♭ Flat
+                            </button>
+                            <button
+                                onClick={handleSharpFlatToggle}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${settings.useSharps ? 'bg-white dark:bg-slate-600 shadow-sm text-black dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                            >
+                                ♯ Sharp
+                            </button>
+                        </div>
+                    </div>
                 </div>
-             )}
+            </section>
 
-             {/* Tuning Tolerance */}
-             <div>
-              <label htmlFor="tolerance-slider" className="block text-lg text-slate-700 dark:text-slate-300 mb-2">Tuning Tolerance</label>
-              <div className="flex items-center gap-4">
-                <input
-                  id="tolerance-slider"
-                  type="range"
-                  min="1"
-                  max="15"
-                  step="0.5"
-                  value={settings.tuningTolerance}
-                  onChange={handleToleranceChange}
-                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <span className="font-mono text-cyan-600 dark:text-cyan-400 w-20 text-center">±{settings.tuningTolerance.toFixed(1)} c</span>
-              </div>
-              <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Sets the "in-tune" range on the display.</p>
-            </div>
+            <hr className="border-slate-200 dark:border-slate-800" />
 
-             {/* Transposition */}
-             <div>
-              <label htmlFor="transposition-slider" className="block text-lg text-slate-700 dark:text-slate-300 mb-2">Transposition</label>
-              <div className="flex items-center gap-4">
-                <input
-                  id="transposition-slider"
-                  type="range"
-                  min="-12"
-                  max="12"
-                  step="1"
-                  value={settings.transposition}
-                  onChange={handleTranspositionChange}
-                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <span className="font-mono text-cyan-600 dark:text-cyan-400 w-20 text-center">{settings.transposition > 0 ? '+' : ''}{settings.transposition} st</span>
-              </div>
-              <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Adjust for transposing instruments (e.g., +2 for B♭ Trumpet).</p>
-            </div>
-
-            {/* Notation System */}
-            <div>
-              <label htmlFor="notation-select" className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Notation System</label>
-              <div className="relative">
-                  <select
-                    id="notation-select"
-                    value={settings.notationSystem}
-                    onChange={handleNotationSystemChange}
-                    className="w-full p-3 rounded-lg font-semibold border transition-colors duration-200 appearance-none
-                              bg-white/60 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700 text-slate-800 dark:text-slate-200
-                              focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                  >
-                    <option value="English">English (C, D, E)</option>
-                    <option value="Solfege (Fixed Do)">Solfege (Do, Re, Mi)</option>
-                    <option value="Northern European">Northern European (C, D, E, H)</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-600 dark:text-slate-400">
-                    <ChevronDownIcon className="w-5 h-5" />
-                  </div>
-              </div>
-            </div>
-
-            {/* Temperament */}
-            <div>
-              <label htmlFor="temperament-select" className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Temperament</label>
-              <div className="relative">
-                  <select
-                    id="temperament-select"
-                    value={settings.temperament}
-                    onChange={handleTemperamentChange}
-                    className="w-full p-3 rounded-lg font-semibold border transition-colors duration-200 appearance-none
-                              bg-white/60 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700 text-slate-800 dark:text-slate-200
-                              focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                  >
-                    <option value="Equal">Equal Temperament</option>
-                    <option value="Just" disabled>Just Intonation (Coming Soon)</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-600 dark:text-slate-400">
-                    <ChevronDownIcon className="w-5 h-5" />
-                  </div>
-              </div>
-            </div>
-
-
-            {/* Sharps/Flats Toggle */}
-            <div>
-              <label className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Accidentals</label>
-              <div className="relative inline-block w-40 h-10">
-                <button
-                  onClick={handleSharpFlatToggle}
-                  className="w-full h-full rounded-full bg-slate-200 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-700 p-1 flex items-center transition-colors"
-                  aria-label={`Switch to ${settings.useSharps ? 'flats' : 'sharps'}`}
-                >
-                  <span className={`absolute left-0 w-1/2 h-full rounded-full bg-white dark:bg-slate-700 shadow-lg transition-transform duration-300 ease-in-out ${settings.useSharps ? 'translate-x-0' : 'translate-x-full'}`}></span>
-                  <span className={`w-1/2 z-10 font-bold ${settings.useSharps ? 'text-cyan-600 dark:text-cyan-300' : 'text-slate-500 dark:text-slate-400'}`}>Sharps (#)</span>
-                  <span className={`w-1/2 z-10 font-bold ${!settings.useSharps ? 'text-cyan-600 dark:text-cyan-300' : 'text-slate-500 dark:text-slate-400'}`}>Flats (♭)</span>
-                </button>
-              </div>
-            </div>
-
-             {/* Smoothing Strength */}
-             <div>
-              <label htmlFor="smoothing-slider" className="block text-lg text-slate-700 dark:text-slate-300 mb-2">Smoothing Strength</label>
-              <div className="flex items-center gap-4">
-                <input
-                  id="smoothing-slider"
-                  type="range"
-                  min="0"
-                  max="0.95"
-                  step="0.05"
-                  value={settings.smoothing}
-                  onChange={handleSmoothingChange}
-                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <span className="font-mono text-cyan-600 dark:text-cyan-400 w-20 text-center">{settings.smoothing.toFixed(2)}</span>
-              </div>
-               <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Higher values provide a more stable reading but react slower.</p>
-            </div>
-            
-             {/* Accessibility */}
-             <div className="border-t border-slate-200 dark:border-slate-700/50 pt-6">
-              <h3 className="text-xl text-slate-700 dark:text-slate-300 mb-4">Accessibility</h3>
-                <div>
-                  <label className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Voice Feedback</label>
-                  <div className="relative inline-block w-40 h-10">
-                    <button
-                      onClick={handleVoiceFeedbackToggle}
-                      className="w-full h-full rounded-full bg-slate-200 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-700 p-1 flex items-center transition-colors"
-                      aria-label={`Turn ${settings.voiceFeedback ? 'off' : 'on'} voice feedback`}
-                    >
-                      <span className={`absolute left-0 w-1/2 h-full rounded-full bg-white dark:bg-slate-700 shadow-lg transition-transform duration-300 ease-in-out ${settings.voiceFeedback ? 'translate-x-full' : 'translate-x-0'}`}></span>
-                      <span className={`w-1/2 z-10 font-bold ${!settings.voiceFeedback ? 'text-slate-600 dark:text-slate-400' : 'text-slate-500 dark:text-slate-400'}`}>Off</span>
-                      <span className={`w-1/2 z-10 font-bold ${settings.voiceFeedback ? 'text-green-600 dark:text-green-300' : 'text-slate-500 dark:text-slate-400'}`}>On</span>
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Announces "Sharp", "Flat", or "In Tune" (requires browser support).</p>
-                </div>
-            </div>
-
-            {/* Debug Tools */}
-            <div className="border-t border-slate-200 dark:border-slate-700/50 pt-6">
-              <h3 className="text-xl text-slate-700 dark:text-slate-300 mb-4">Debug Tools</h3>
-              <div className="space-y-6">
-                 {/* Timbre Visualizer */}
+            {/* Advanced Settings */}
+            <section className="space-y-4">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Advanced</label>
                  <div>
-                  <label className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Timbre Orb</label>
-                  <div className="relative inline-block w-40 h-10">
-                    <button
-                      onClick={handleTimbreVisualizerToggle}
-                      className="w-full h-full rounded-full bg-slate-200 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-700 p-1 flex items-center transition-colors"
-                      aria-label={`Turn ${settings.timbreVisualizer ? 'off' : 'on'} timbre visualizer`}
-                    >
-                      <span className={`absolute left-0 w-1/2 h-full rounded-full bg-white dark:bg-slate-700 shadow-lg transition-transform duration-300 ease-in-out ${settings.timbreVisualizer ? 'translate-x-full' : 'translate-x-0'}`}></span>
-                      <span className={`w-1/2 z-10 font-bold ${!settings.timbreVisualizer ? 'text-slate-600 dark:text-slate-400' : 'text-slate-500 dark:text-slate-400'}`}>Off</span>
-                      <span className={`w-1/2 z-10 font-bold ${settings.timbreVisualizer ? 'text-sky-600 dark:text-sky-300' : 'text-slate-500 dark:text-slate-400'}`}>On</span>
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Generative art that visualizes sound harmonics.</p>
+                    <div className="flex justify-between mb-1.5">
+                        <label htmlFor="tolerance" className="text-sm font-medium text-slate-700 dark:text-slate-300">Tuning Tolerance</label>
+                        <span className="text-sm font-bold">±{settings.tuningTolerance} cents</span>
+                    </div>
+                    <input
+                        id="tolerance"
+                        type="range"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value={settings.tuningTolerance}
+                        onChange={handleToleranceChange}
+                        className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                    />
                 </div>
-                 {/* Spectrum */}
-                <div>
-                  <label className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Spectrum</label>
-                  <div className="relative inline-block w-40 h-10">
-                    <button
-                      onClick={handleDebugToggle}
-                      className="w-full h-full rounded-full bg-slate-200 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-700 p-1 flex items-center transition-colors"
-                      aria-label={`Turn ${settings.debugMode ? 'off' : 'on'} spectrum visualizer`}
-                    >
-                      <span className={`absolute left-0 w-1/2 h-full rounded-full bg-white dark:bg-slate-700 shadow-lg transition-transform duration-300 ease-in-out ${settings.debugMode ? 'translate-x-full' : 'translate-x-0'}`}></span>
-                      <span className={`w-1/2 z-10 font-bold ${!settings.debugMode ? 'text-slate-600 dark:text-slate-400' : 'text-slate-500 dark:text-slate-400'}`}>Off</span>
-                      <span className={`w-1/2 z-10 font-bold ${settings.debugMode ? 'text-fuchsia-600 dark:text-fuchsia-300' : 'text-slate-500 dark:text-slate-400'}`}>On</span>
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Shows real-time audio spectrum (FFT).</p>
-                </div>
-                 {/* Waveform */}
                  <div>
-                  <label className="block text-lg text-slate-700 dark:text-slate-300 mb-3">Waveform</label>
-                  <div className="relative inline-block w-40 h-10">
-                    <button
-                      onClick={handleWaveformToggle}
-                      className="w-full h-full rounded-full bg-slate-200 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-700 p-1 flex items-center transition-colors"
-                      aria-label={`Turn ${settings.debugWaveform ? 'off' : 'on'} waveform visualizer`}
-                    >
-                      <span className={`absolute left-0 w-1/2 h-full rounded-full bg-white dark:bg-slate-700 shadow-lg transition-transform duration-300 ease-in-out ${settings.debugWaveform ? 'translate-x-full' : 'translate-x-0'}`}></span>
-                      <span className={`w-1/2 z-10 font-bold ${!settings.debugWaveform ? 'text-slate-600 dark:text-slate-400' : 'text-slate-500 dark:text-slate-400'}`}>Off</span>
-                      <span className={`w-1/2 z-10 font-bold ${settings.debugWaveform ? 'text-purple-600 dark:text-purple-300' : 'text-slate-500 dark:text-slate-400'}`}>On</span>
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-500 mt-2">Shows raw audio waveform (Time Domain).</p>
+                    <div className="flex justify-between mb-1.5">
+                        <label htmlFor="smoothing" className="text-sm font-medium text-slate-700 dark:text-slate-300">Needle Smoothing</label>
+                        <span className="text-sm font-bold">{(settings.smoothing * 100).toFixed(0)}%</span>
+                    </div>
+                    <input
+                        id="smoothing"
+                        type="range"
+                        min="0"
+                        max="0.95"
+                        step="0.05"
+                        value={settings.smoothing}
+                        onChange={handleSmoothingChange}
+                        className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                    />
                 </div>
-              </div>
-            </div>
+            </section>
+
+            <hr className="border-slate-200 dark:border-slate-800" />
+
+            {/* Debugging */}
+            <section className="space-y-4 pb-4">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Debugging</label>
+                <div className="flex items-center justify-between">
+                    <label htmlFor="debugModeToggle" className="font-medium text-slate-700 dark:text-slate-300 text-sm">Show Spectrum (FFT)</label>
+                    <button
+                        id="debugModeToggle"
+                        role="switch"
+                        aria-checked={settings.debugMode}
+                        onClick={handleDebugToggle}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 dark:focus:ring-offset-slate-900 ${settings.debugMode ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.debugMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+                <div className="flex items-center justify-between">
+                    <label htmlFor="waveformToggle" className="font-medium text-slate-700 dark:text-slate-300 text-sm">Show Waveform</label>
+                    <button id="waveformToggle" role="switch" aria-checked={!!settings.debugWaveform} onClick={handleDebugWaveformToggle}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 dark:focus:ring-offset-slate-900 ${settings.debugWaveform ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.debugWaveform ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+            </section>
           </div>
-          
-          <footer className="text-center text-slate-500 dark:text-slate-600 text-sm py-4 mt-auto">
-            <p>Hybrid Tuner v1.0</p>
-          </footer>
         </div>
       </div>
     </>

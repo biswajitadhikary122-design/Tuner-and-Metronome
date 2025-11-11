@@ -1,6 +1,6 @@
 {
-  "name": "Tuner and Metronome",
-  "description": "A high-precision musical instrument tuner using a hybrid pitch detection algorithm. It combines FFT for frequency spectrum analysis and Autocorrelation for fundamental pitch refinement, providing stable and accurate tuning through a futuristic, glassy user interface.",
+  "name": "TunerBeatsPro",
+  "description": "A professional toolkit for musicians, including a high-precision tuner, a versatile metronome, an AI practice coach, and music theory learning tools.",
   "requestFramePermissions": [
     "microphone"
   ]

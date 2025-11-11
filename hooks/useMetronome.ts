@@ -1,6 +1,10 @@
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import type { TimeSignature, MetronomeSound, Subdivision, BeatEmphasis, SoundEmphasis, TrainerConfig, SilenceConfig, MetronomePreset, AutoStopConfig } from '../types';
+
+
+import React, { useState, useRef, useEffect, useCallback, useMemo, useImperativeHandle } from 'react';
+import type { TimeSignature, MetronomeSound, Subdivision, BeatEmphasis, SoundEmphasis, TrainerConfig, SilenceConfig, MetronomePreset, AutoStopConfig, MetronomeControls, MetronomePlanConfig } from '../types';
+import { SUBDIVISION_PATTERNS } from '../services/data';
+import { parseTimeSignature } from '../services/metronomeUtils';
 
 // How far ahead to schedule audio (sec)
 const SCHEDULE_AHEAD_TIME = 0.1;
@@ -13,13 +17,13 @@ interface ScheduledNote {
   isMuted: boolean;
 }
 
-export const useMetronome = () => {
+export const useMetronome = (ref: React.Ref<MetronomeControls>) => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [bpm, setBpm] = useState<number>(120);
   const [timeSignature, setTimeSignature] = useState<TimeSignature>('4/4');
   const [sound, setSound] = useState<MetronomeSound>('Click');
   const [currentBeat, setCurrentBeat] = useState<number>(0);
-  const [subdivision, setSubdivision] = useState<Subdivision>('1n');
+  const [subdivision, setSubdivision] = useState<Subdivision>('quarter');
   const [emphasisPattern, setEmphasisPattern] = useState<BeatEmphasis[]>(['accent', 'regular', 'regular', 'regular']);
   const [volume, setVolume] = useState<number>(0.75);
   
@@ -43,13 +47,51 @@ export const useMetronome = () => {
   const noteCounterRef = useRef<number>(0); // Persistent counter for beats
   const isMounted = useRef(true);
   const currentBpmRef = useRef<number>(bpm); // For internal scheduler logic
+  const prevIsSwingActiveRef = useRef<boolean>(isSwingActive);
 
-  const beatsPerMeasure = parseInt(timeSignature.split('/')[0], 10);
+  const { beatsPerMeasure, grouping } = useMemo(() => parseTimeSignature(timeSignature), [timeSignature]);
+
+  const cycleEmphasisForBeat = useCallback((beatIndex: number) => {
+    setEmphasisPattern(currentPattern => {
+        if (beatIndex < 0 || beatIndex >= currentPattern.length) {
+            return currentPattern;
+        }
+
+        const newPattern = [...currentPattern];
+        const currentEmphasis = newPattern[beatIndex];
+        
+        switch (currentEmphasis) {
+            case 'accent':
+                newPattern[beatIndex] = 'regular';
+                break;
+            case 'regular':
+                newPattern[beatIndex] = 'silent';
+                break;
+            case 'silent':
+            default:
+                newPattern[beatIndex] = 'accent';
+                break;
+        }
+        return newPattern;
+    });
+  }, []);
 
   useEffect(() => {
     currentBpmRef.current = bpm;
   }, [bpm]);
   
+  useEffect(() => {
+    // If swing was just turned on (i.e., it was false before and is now true)
+    if (!prevIsSwingActiveRef.current && isSwingActive) {
+        // and if we're on quarter notes, switch to eighths to make the swing audible.
+        if (subdivision === 'quarter') {
+            setSubdivision('eighth');
+        }
+    }
+    // Update the ref for the next render
+    prevIsSwingActiveRef.current = isSwingActive;
+  }, [isSwingActive, subdivision]);
+
   // Any change to settings should mark the current preset as "dirty" (i.e., it's now a custom session)
   useEffect(() => {
     setActivePresetId(null);
@@ -57,16 +99,28 @@ export const useMetronome = () => {
 
   // Update emphasis pattern when time signature changes
   useEffect(() => {
-    const newBeats = parseInt(timeSignature.split('/')[0], 10);
-    setEmphasisPattern(currentPattern => {
-        const newPattern = new Array(newBeats).fill('regular');
-        newPattern[0] = 'accent';
-        for (let i = 1; i < Math.min(newBeats, currentPattern.length); i++) {
-            newPattern[i] = currentPattern[i];
-        }
-        return newPattern;
-    });
-  }, [timeSignature]);
+    if (grouping) {
+        const newPattern: BeatEmphasis[] = new Array(beatsPerMeasure).fill('regular');
+        let currentBeatIndex = 0;
+        grouping.forEach(groupSize => {
+            if (currentBeatIndex < beatsPerMeasure) {
+                newPattern[currentBeatIndex] = 'accent';
+            }
+            currentBeatIndex += groupSize;
+        });
+        setEmphasisPattern(newPattern);
+    } else {
+        const newPattern = new Array(beatsPerMeasure).fill('regular');
+        if (newPattern.length > 0) newPattern[0] = 'accent';
+        // Preserve user's emphasis settings for other beats if possible
+        setEmphasisPattern(current => {
+            for(let i=1; i < Math.min(newPattern.length, current.length); i++) {
+                newPattern[i] = current[i];
+            }
+            return newPattern;
+        });
+    }
+  }, [beatsPerMeasure, grouping]);
   
   // Update volume
   useEffect(() => {
@@ -120,7 +174,8 @@ export const useMetronome = () => {
             osc.stop(time + 0.15);
             break;
         }
-        case 'Click': {
+        case 'Click':
+        case 'Tick': { // Tick is a high click
           const osc = context.createOscillator();
           const gain = context.createGain();
           osc.connect(gain);
@@ -137,6 +192,189 @@ export const useMetronome = () => {
           osc.stop(time + 0.02);
           break;
         }
+        case 'Tock': { // Tock is a lower click
+          const osc = context.createOscillator();
+          const gain = context.createGain();
+          osc.connect(gain);
+          gain.connect(destination);
+          osc.type = 'triangle';
+          let freq = 800;
+          if (emphasis === 'primary') freq = 900;
+          if (emphasis === 'secondary') freq = 700;
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(peakGain, time);
+          gain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+          osc.start(time);
+          osc.stop(time + 0.02);
+          break;
+        }
+        case 'Woodblock':
+        case 'Clave': {
+            const osc = context.createOscillator();
+            const gain = context.createGain();
+            osc.connect(gain);
+            gain.connect(destination);
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(soundType === 'Clave' ? 2500 : 2000, time);
+            gain.gain.setValueAtTime(peakGain, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+            osc.start(time);
+            osc.stop(time + 0.1);
+            break;
+        }
+        case 'Rimshot': {
+            const noiseDur = 0.05;
+            const noiseBuffer = context.createBuffer(1, context.sampleRate * noiseDur, context.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < output.length; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            const noise = context.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const noiseGain = context.createGain();
+            noiseGain.gain.setValueAtTime(peakGain * 0.5, time);
+            noiseGain.gain.exponentialRampToValueAtTime(0.001, time + noiseDur);
+            
+            const bandpass = context.createBiquadFilter();
+            bandpass.type = 'bandpass';
+            bandpass.frequency.value = 1500;
+            bandpass.Q.value = 10;
+            
+            noise.connect(bandpass);
+            bandpass.connect(noiseGain);
+            noiseGain.connect(destination);
+            noise.start(time);
+            
+            const osc = context.createOscillator();
+            const gain = context.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = 1000;
+            gain.gain.setValueAtTime(peakGain, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.03);
+            osc.connect(gain);
+            gain.connect(destination);
+            osc.start(time);
+            osc.stop(time + 0.03);
+            break;
+        }
+        case 'Hi-Hat': {
+            const dur = 0.1;
+            const noiseBuffer = context.createBuffer(1, context.sampleRate * dur, context.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < output.length; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            const noise = context.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const highpass = context.createBiquadFilter();
+            highpass.type = 'highpass';
+            highpass.frequency.value = 7000;
+
+            const gain = context.createGain();
+            gain.gain.setValueAtTime(peakGain * 0.5, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+            
+            noise.connect(highpass);
+            highpass.connect(gain);
+            gain.connect(destination);
+            noise.start(time);
+            break;
+        }
+        case 'Cowbell': {
+            const osc1 = context.createOscillator();
+            const osc2 = context.createOscillator();
+            const gain = context.createGain();
+            osc1.type = 'square';
+            osc2.type = 'square';
+            osc1.frequency.value = 540;
+            osc2.frequency.value = 810; // 3:2 ratio
+            
+            gain.gain.setValueAtTime(peakGain, time);
+            gain.gain.exponentialRampToValueAtTime(0.1, time + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(destination);
+            osc1.start(time);
+            osc2.start(time);
+            osc1.stop(time + 0.2);
+            osc2.stop(time + 0.2);
+            break;
+        }
+        case 'Triangle':
+        case 'Bell':
+        case 'Ping': {
+            const fundamental = soundType === 'Ping' ? 2500 : (soundType === 'Bell' ? 600 : 1200);
+            const harmonics = [1, 2.0, 3.0, 4.16, 5.43, 6.79, 8.21];
+            const harmonicGains = [0.6, 0.4, 0.3, 0.2, 0.15, 0.1, 0.05];
+            const dur = soundType === 'Ping' ? 0.3 : 1.0;
+            
+            const masterGain = context.createGain();
+            masterGain.gain.setValueAtTime(peakGain, time);
+            masterGain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+            masterGain.connect(destination);
+
+            harmonics.forEach((h, i) => {
+                const osc = context.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = fundamental * h;
+                const gain = context.createGain();
+                gain.gain.value = harmonicGains[i] * 0.5;
+                osc.connect(gain);
+                gain.connect(masterGain);
+                osc.start(time);
+                osc.stop(time + dur);
+            });
+            break;
+        }
+        case 'Shaker': {
+            const dur = 0.08;
+            const noiseBuffer = context.createBuffer(1, context.sampleRate * dur, context.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < output.length; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            const noise = context.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const bandpass = context.createBiquadFilter();
+            bandpass.type = 'bandpass';
+            bandpass.frequency.value = 4000;
+            bandpass.Q.value = 1;
+
+            const gain = context.createGain();
+            gain.gain.setValueAtTime(0, time);
+            gain.gain.linearRampToValueAtTime(peakGain * 0.3, time + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+            
+            noise.connect(bandpass);
+            bandpass.connect(gain);
+            gain.connect(destination);
+            noise.start(time);
+            break;
+        }
+        case 'Marimba': {
+            const osc = context.createOscillator();
+            const gain = context.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880; // A5
+            if (emphasis === 'primary') osc.frequency.value = 1046.5; // C6
+            if (emphasis === 'secondary') osc.frequency.value = 659.25; // E5
+
+            const decay = 0.5;
+            gain.gain.setValueAtTime(peakGain, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
+            
+            osc.connect(gain);
+            gain.connect(destination);
+            osc.start(time);
+            osc.stop(time + decay);
+            break;
+        }
+        case 'Beep':
         default: {
             const osc = context.createOscillator();
             const gain = context.createGain();
@@ -160,7 +398,7 @@ export const useMetronome = () => {
   const scheduleNote = useCallback((time: number, emphasis: BeatEmphasis, soundEmphasis: SoundEmphasis, isMuted: boolean) => {
     const context = audioContextRef.current;
     if (!context || emphasis === 'silent' || isMuted) return;
-    const soundToPlay = soundEmphasis === 'secondary' ? 'Tick' : sound;
+    const soundToPlay = sound;
     generateSound(context, time, soundToPlay, soundEmphasis);
   }, [sound, generateSound]);
 
@@ -190,27 +428,34 @@ export const useMetronome = () => {
                 }
             }
 
-            const isMuted = silenceConfig.enabled && (measureNumber % totalSilencePatternBars) >= silenceConfig.barsToPlay;
+            const isMeasureMuted = silenceConfig.enabled && (measureNumber % totalSilencePatternBars) >= silenceConfig.barsToPlay;
             const beatInMeasure = (noteCounterRef.current % beatsPerMeasure);
-            const currentEmphasis = emphasisPattern[beatInMeasure] || 'regular';
+            const currentBeatEmphasis = emphasisPattern[beatInMeasure] || 'regular';
 
-            scheduleNote(nextNoteTimeRef.current, currentEmphasis, currentEmphasis === 'accent' ? 'primary' : 'regular', isMuted);
-            scheduledNotesRef.current.push({ time: nextNoteTimeRef.current, beat: beatInMeasure + 1, isMuted });
-
-            // Schedule subdivisions
-            if (subdivision !== '1n') {
-                const swingOffset = isSwingActive ? secondsPerBeat * (2/3) : secondsPerBeat * 0.5;
-                const subBeatDurations: Record<Subdivision, number[]> = {
-                    '1n': [],
-                    '2n': [swingOffset],
-                    '3n': [secondsPerBeat / 3, secondsPerBeat * (2/3)],
-                    '4n': [secondsPerBeat * 0.25, secondsPerBeat * 0.5, secondsPerBeat * 0.75]
-                };
-                subBeatDurations[subdivision].forEach(offset => {
-                    const subTime = nextNoteTimeRef.current + offset;
-                    scheduleNote(subTime, 'regular', 'secondary', isMuted);
-                });
+            // Determine which timings to use for this beat
+            let timingsToUse = SUBDIVISION_PATTERNS[subdivision] || [0];
+            // Special handling for swing on simple eighth notes
+            if (subdivision === 'eighth' && isSwingActive) {
+                timingsToUse = [0, 2 / 3];
+            } else if (subdivision === 'shuffle' && isSwingActive) { // Treat dedicated shuffle pattern as swing
+                timingsToUse = [0, 2 / 3];
             }
+
+            // Schedule all notes within this beat
+            timingsToUse.forEach(offset => {
+                const time = nextNoteTimeRef.current + offset * secondsPerBeat;
+                const isMainBeatClick = offset === 0;
+
+                const beatEmphasisForNote = isMainBeatClick ? currentBeatEmphasis : 'regular';
+                const soundEmphasisForNote: SoundEmphasis = isMainBeatClick 
+                    ? (currentBeatEmphasis === 'accent' ? 'primary' : 'regular') 
+                    : 'regular';
+                
+                scheduleNote(time, beatEmphasisForNote, soundEmphasisForNote, isMeasureMuted);
+            });
+            
+            // Only push the main beat to the visualizer schedule
+            scheduledNotesRef.current.push({ time: nextNoteTimeRef.current, beat: beatInMeasure + 1, isMuted: isMeasureMuted });
 
             noteCounterRef.current++;
             nextNoteTimeRef.current += secondsPerBeat;
@@ -220,51 +465,41 @@ export const useMetronome = () => {
 
   const visualUpdater = useCallback(() => {
     if (!audioContextRef.current || !isMounted.current || !isPlaying) {
-        animationFrameIdRef.current = null;
+      animationFrameIdRef.current = null;
+      return;
+    }
+
+    // This is the recursive call for the animation loop
+    animationFrameIdRef.current = requestAnimationFrame(visualUpdater);
+
+    if (scheduledNotesRef.current.length === 0) {
+        // No notes scheduled yet, just wait for the next frame
         return;
     }
 
     const now = audioContextRef.current.currentTime;
     
-    const pruneTime = now - 1.0; 
+    const pruneTime = now - 2.0; 
     const pruneIndex = scheduledNotesRef.current.findIndex(note => note.time >= pruneTime);
     if (pruneIndex > 1) { 
         scheduledNotesRef.current.splice(0, pruneIndex - 1);
     }
     
-    let lastPassedNote: ScheduledNote | null = null;
+    const VISUAL_LOOKAHEAD = 0.020; // 20ms
+    let beatToDisplay = 0;
+
     for (let i = scheduledNotesRef.current.length - 1; i >= 0; i--) {
-        if (scheduledNotesRef.current[i].time <= now) {
-            lastPassedNote = scheduledNotesRef.current[i];
+        const note = scheduledNotesRef.current[i];
+        const visualStartTime = note.time - VISUAL_LOOKAHEAD;
+
+        if (now >= visualStartTime) {
+            beatToDisplay = note.beat;
             break;
         }
     }
     
-    if (lastPassedNote) {
-        if (currentBeat !== lastPassedNote.beat) {
-             setCurrentBeat(lastPassedNote.beat);
-        }
-    }
-    
-    animationFrameIdRef.current = requestAnimationFrame(visualUpdater);
-  }, [isPlaying, currentBeat]);
-
-  useEffect(() => {
-    if (isPlaying) {
-        visualUpdater();
-    } else {
-        if (animationFrameIdRef.current) {
-            cancelAnimationFrame(animationFrameIdRef.current);
-            animationFrameIdRef.current = null;
-        }
-    }
-    return () => {
-        if (animationFrameIdRef.current) {
-            cancelAnimationFrame(animationFrameIdRef.current);
-            animationFrameIdRef.current = null;
-        }
-    };
-  }, [isPlaying, visualUpdater]);
+    setCurrentBeat(beatToDisplay);
+  }, [isPlaying]);
 
   const startScheduler = useCallback(() => {
     const context = initializeAudio();
@@ -275,10 +510,9 @@ export const useMetronome = () => {
     if (context.state === 'suspended') context.resume();
     
     currentBpmRef.current = bpm;
-    setCurrentBeat(0);
     scheduledNotesRef.current = [];
     noteCounterRef.current = 0;
-    nextNoteTimeRef.current = context.currentTime + 0.1;
+    nextNoteTimeRef.current = context.currentTime;
     tapTempoTimestampsRef.current = [];
     
     if (isCountInEnabled) {
@@ -293,17 +527,32 @@ export const useMetronome = () => {
     schedulerRef.current?.();
     const timerId = window.setInterval(() => schedulerRef.current?.(), SCHEDULER_INTERVAL);
     schedulerTimerRef.current = timerId;
-  }, [initializeAudio, bpm, isCountInEnabled, beatsPerMeasure, scheduleNote]);
+    
+    // Start visual loop
+    visualUpdater();
+  }, [initializeAudio, bpm, isCountInEnabled, beatsPerMeasure, scheduleNote, visualUpdater]);
   
   const stopScheduler = useCallback(() => {
     if (schedulerTimerRef.current) {
         window.clearInterval(schedulerTimerRef.current);
         schedulerTimerRef.current = null;
     }
-    setTimeout(() => { if (isMounted.current) setCurrentBeat(0); }, 100);
+    if (animationFrameIdRef.current) {
+      // FIX: Use window.cancelAnimationFrame for consistency and to avoid scope issues.
+      window.cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(e => console.error("Error closing AudioContext:", e));
+        audioContextRef.current = null;
+    }
+    // FIX: Use window.setTimeout for consistency and to avoid scope issues.
+    window.setTimeout(() => { if (isMounted.current) setCurrentBeat(0); }, 100);
   }, []);
 
-  const togglePlay = useCallback(() => setIsPlaying(p => !p), []);
+  const togglePlay = useCallback(() => {
+    setIsPlaying(p => !p);
+  }, []);
 
   useEffect(() => {
     if (isPlaying) startScheduler();
@@ -362,22 +611,43 @@ export const useMetronome = () => {
     setActivePresetId(preset.id);
   }, []);
 
+  const setConfig = useCallback((config: MetronomePlanConfig) => {
+    setIsPlaying(false);
+    if(config.bpm) setBpm(config.bpm);
+    if(config.timeSignature) setTimeSignature(config.timeSignature);
+    if(config.subdivision) setSubdivision(config.subdivision);
+    if(config.isSwingActive !== undefined) setIsSwingActive(config.isSwingActive);
+    if(config.trainerConfig) setTrainerConfig(config.trainerConfig);
+    if(config.silenceConfig) setSilenceConfig(config.silenceConfig);
+    if(config.autoStopConfig) setAutoStopConfig(config.autoStopConfig);
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    setConfig,
+    play: () => setIsPlaying(true),
+    stop: () => setIsPlaying(false),
+    togglePlay: togglePlay,
+  }));
+
   useEffect(() => {
     isMounted.current = true;
     return () => {
         isMounted.current = false;
         stopScheduler();
-        audioContextRef.current?.close();
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+          audioContextRef.current.close();
+        }
     };
   }, [stopScheduler]);
 
   return {
     isPlaying, bpm, setBpm, timeSignature, setTimeSignature, sound, setSound,
-    currentBeat, togglePlay, beatsPerMeasure, playSoundPreview, tapTempo,
+    currentBeat, togglePlay, beatsPerMeasure, grouping, playSoundPreview, tapTempo,
     subdivision, setSubdivision, emphasisPattern, setEmphasisPattern, volume, setVolume,
     isSwingActive, setIsSwingActive, isCountInEnabled, setIsCountInEnabled,
     trainerConfig, setTrainerConfig, silenceConfig, setSilenceConfig,
     autoStopConfig, setAutoStopConfig,
     activePresetId, loadPreset,
+    cycleEmphasisForBeat,
   };
 };

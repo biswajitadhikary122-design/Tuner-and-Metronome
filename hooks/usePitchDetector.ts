@@ -1,43 +1,44 @@
-
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { NoteDetails, TuningSettings } from '../types';
-import { findPitchFromAutocorrelation, findPitchFromHPS, frequencyToNoteDetails } from '../services/pitch';
-import { PRESET_CONFIGS } from '../constants';
+import { applyHannWindow, findPitchFromAutocorrelation, findPitchFromHPS, frequencyToNoteDetails } from '../services/pitch';
+import { PRESET_CONFIGS } from '../services/data';
 
 const FFT_SIZE = 8192; // Increased for better frequency resolution
-const CONFIDENCE_THRESHOLD = 0.8;
+const CONFIDENCE_THRESHOLD = 0.7; // Lowered for more sensitivity
 const SILENCE_THRESHOLD = 10;  // Require 10 frames of silence to clear the display
-const NOISE_GATE_THRESHOLD = 0.002; // Lowered to pick up quieter sounds
+const NOISE_GATE_THRESHOLD = 0.0005; // Lowered to pick up fainter sounds
 
 export const usePitchDetector = (settings: TuningSettings) => {
   const [note, setNote] = useState<NoteDetails | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
+  const [volume, setVolume] = useState<number>(0);
   const [spectrum, setSpectrum] = useState<Float32Array | null>(null);
   const [waveform, setWaveform] = useState<Float32Array | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
+  // --- Refs for stabilization and state management ---
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   const timeDomainDataRef = useRef<Float32Array | null>(null);
   const freqDomainDataRef = useRef<Float32Array | null>(null);
-
-  const smoothedPitchRef = useRef<number>(0);
-  const lastNoteIdRef = useRef<string | null>(null);
-
-  // Ref for silence detection
-  const framesSinceDetectionRef = useRef<number>(0);
+  
+  const smoothedPitchRef = useRef<number>(0); // For Step 3: Smoothing
+  const framesSinceDetectionRef = useRef<number>(0); // For Step 1: Noise Gate
 
   const processAudio = useCallback(() => {
     if (!analyserRef.current || !timeDomainDataRef.current || !freqDomainDataRef.current || !audioContextRef.current) {
       return;
     }
-
+    
+    // --- STEP 1: CAPTURING AND PREPARING AUDIO ---
+    // Capture waveform (time-domain) and spectrum (frequency-domain) data.
     analyserRef.current.getFloatTimeDomainData(timeDomainDataRef.current);
     analyserRef.current.getFloatFrequencyData(freqDomainDataRef.current);
     
-    // --- Noise Gate based on RMS Volume ---
+    // Noise Gate: Calculate Root Mean Square (RMS) volume to determine if sound is present.
+    // If volume is below the threshold, treat it as silence and skip pitch detection.
     let rms = 0;
     for (let i = 0; i < timeDomainDataRef.current.length; i++) {
         rms += timeDomainDataRef.current[i] * timeDomainDataRef.current[i];
@@ -46,23 +47,24 @@ export const usePitchDetector = (settings: TuningSettings) => {
 
     if (rms < NOISE_GATE_THRESHOLD) {
       framesSinceDetectionRef.current++;
-      // If we've had silence for a while, clear the display
+      setVolume(0);
+      // If we've had silence for a while, clear the display and reset state
       if (framesSinceDetectionRef.current >= SILENCE_THRESHOLD) {
           setNote(null);
-          setConfidence(0);
           smoothedPitchRef.current = 0;
-          lastNoteIdRef.current = null; 
+          setSpectrum(new Float32Array(freqDomainDataRef.current.length)); // Send silent spectrum
       }
       animationFrameIdRef.current = requestAnimationFrame(processAudio);
       return; // Skip pitch detection for this frame
-    }
-    // --- End Noise Gate ---
-
-    if (settings.debugMode) {
-      setSpectrum(new Float32Array(freqDomainDataRef.current));
     } else {
-      setSpectrum(null); // Clear spectrum data if debug mode is off
+        // Convert RMS to a dB-like level. 96 is a common offset for dBFS to dBSPL.
+        const db = 20 * Math.log10(rms || 1e-9) + 96;
+        setVolume(Math.max(0, db));
     }
+    // --- End Step 1 Part A ---
+
+    // Always provide spectrum for TimbreVisualizer
+    setSpectrum(new Float32Array(freqDomainDataRef.current));
     
     if (settings.debugWaveform) {
       setWaveform(new Float32Array(timeDomainDataRef.current));
@@ -71,21 +73,28 @@ export const usePitchDetector = (settings: TuningSettings) => {
     }
 
     const { minFreq, maxFreq } = PRESET_CONFIGS[settings.preset];
+    
+    // --- STEP 2: CORE PITCH DETECTION (HYBRID APPROACH) ---
+    // Windowing: Apply a Hann window to the audio snippet to improve FFT accuracy (Part of Step 1).
+    const windowedBuffer = new Float32Array(timeDomainDataRef.current);
+    applyHannWindow(windowedBuffer);
 
-    // YIN for fundamental frequency
+    // Method 1: YIN Algorithm on the time-domain data (waveform).
     const { frequency: acFreq, confidence: acConfidence } = findPitchFromAutocorrelation(
-      timeDomainDataRef.current, 
+      windowedBuffer, 
       audioContextRef.current.sampleRate,
       minFreq,
       maxFreq
     );
-    // HPS for harmonic-aware fundamental frequency
+    // Method 2: Harmonic Product Spectrum (HPS) on the frequency-domain data.
     const { frequency: hpsFreq } = findPitchFromHPS(freqDomainDataRef.current, audioContextRef.current.sampleRate);
 
     let finalFrequency = -1;
     let currentConfidence = 0;
 
-    // Hybrid logic: Use YIN's confidence but verify with HPS
+    // Combining Results: Use YIN's confidence but verify with HPS.
+    // If YIN is confident and agrees with HPS, the result is very reliable.
+    // If they disagree, we trust the YIN result as it's generally more stable for fundamentals.
     if (acConfidence > CONFIDENCE_THRESHOLD) {
         const diff = Math.abs(acFreq - hpsFreq);
         // If YIN and HPS agree, we are very confident. Average them, favoring YIN.
@@ -104,29 +113,44 @@ export const usePitchDetector = (settings: TuningSettings) => {
     
     setConfidence(currentConfidence);
 
-    if (finalFrequency > 0 && currentConfidence > CONFIDENCE_THRESHOLD) {
-      framesSinceDetectionRef.current = 0; // Reset silence counter
+    // --- STEP 3: STABILIZING THE TUNER ---
+    // Smoothing: Apply exponential smoothing to the raw detected frequency to prevent jitter.
+    if (finalFrequency > 0) {
+        smoothedPitchRef.current = (settings.smoothing * smoothedPitchRef.current) + ((1 - settings.smoothing) * finalFrequency);
+    }
+    
+    // --- STEP 4: TRANSLATING FREQUENCY TO MUSIC ---
+    // Identify the note name, octave, and cents deviation from the smoothed frequency.
+    const detectedNoteDetails = frequencyToNoteDetails(smoothedPitchRef.current, settings);
 
-      // Apply smoothing to the raw detected frequency
-      smoothedPitchRef.current = (settings.smoothing * smoothedPitchRef.current) + ((1 - settings.smoothing) * finalFrequency);
-      
-      const currentNoteDetails = frequencyToNoteDetails(smoothedPitchRef.current, settings);
-
-      if (currentNoteDetails) {
-        setNote(currentNoteDetails);
-      }
+    // --- Simplified Note Display Logic ---
+    if (settings.preset === 'Hz (Manual)') {
+        if (finalFrequency > 0 && detectedNoteDetails) {
+            setNote(detectedNoteDetails);
+        } else {
+            framesSinceDetectionRef.current++;
+            if (framesSinceDetectionRef.current >= SILENCE_THRESHOLD) {
+                setNote(null);
+            }
+        }
     } else {
-      // No clear note detected in this frame
-      framesSinceDetectionRef.current++;
-
-      // If we've had silence for a while, clear the display
-      if (framesSinceDetectionRef.current >= SILENCE_THRESHOLD) {
-          setNote(null);
-          smoothedPitchRef.current = 0;
-          lastNoteIdRef.current = null; 
-      }
+        // Standard note detection
+        if (detectedNoteDetails && finalFrequency > 0 && currentConfidence > CONFIDENCE_THRESHOLD) {
+            framesSinceDetectionRef.current = 0; // Sound is detected, reset silence counter
+            setNote(detectedNoteDetails);
+        } else { // No clear note detected or confidence is too low
+            framesSinceDetectionRef.current++;
+            
+            // If silence has persisted, clear the note from the display
+            if (framesSinceDetectionRef.current >= SILENCE_THRESHOLD) {
+                setNote(null);
+                smoothedPitchRef.current = 0;
+            }
+        }
     }
 
+
+    // The final `note` state is what gets sent to the display component (Step 5).
     animationFrameIdRef.current = requestAnimationFrame(processAudio);
   }, [settings]);
 
@@ -152,7 +176,7 @@ export const usePitchDetector = (settings: TuningSettings) => {
     if (audioContextRef.current) {
       return;
     }
-    
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -172,9 +196,6 @@ export const usePitchDetector = (settings: TuningSettings) => {
       const source = context.createMediaStreamSource(stream);
       mediaStreamSourceRef.current = source;
 
-      const gainNode = context.createGain();
-      gainNode.gain.value = 2.5; // Amplify the signal
-
       const analyser = context.createAnalyser();
       analyser.fftSize = FFT_SIZE;
       analyserRef.current = analyser;
@@ -184,9 +205,8 @@ export const usePitchDetector = (settings: TuningSettings) => {
       hpFilter.type = 'highpass';
       hpFilter.frequency.value = 50;
 
-      // Connect nodes: source -> gain -> filter -> analyser
-      source.connect(gainNode);
-      gainNode.connect(hpFilter);
+      // Connect nodes: source -> filter -> analyser
+      source.connect(hpFilter);
       hpFilter.connect(analyser);
 
       timeDomainDataRef.current = new Float32Array(analyser.fftSize);
@@ -209,5 +229,5 @@ export const usePitchDetector = (settings: TuningSettings) => {
     // by requestAnimationFrame is the newest one with the correct settings closure.
   }, [settings, processAudio]);
 
-  return { note, confidence, spectrum, waveform, start, stop, isRunning };
+  return { note, confidence, volume, spectrum, waveform, start, stop, isRunning };
 };

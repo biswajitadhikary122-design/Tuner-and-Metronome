@@ -1,170 +1,168 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import type { TuningSettings, ChordDetails, ChordNote } from '../types';
-import { NOTE_NAMES_SHARP, NOTE_NAMES_FLAT } from '../constants';
-import { A4_MIDI } from './pitch';
+import type { BeatEmphasis, PlanStep } from '../types';
+import { parseTimeSignature } from "./metronomeUtils";
 
-const PEAK_THRESHOLD_DB = -60; // dB level to consider a frequency peak significant
-const MIN_PEAK_DISTANCE_HZ = 15; // Minimum separation between peaks
+// This instance is for text and AI-powered features
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
 
 /**
- * Processes raw FFT spectrum data to find significant frequency peaks.
- * @param spectrum The raw Float32Array from the AnalyserNode.
- * @param sampleRate The sample rate of the audio context.
- * @returns An array of objects with frequency and amplitude for each significant peak.
+ * Gets a music theory explanation from the AI as a stream.
+ * @param query The user's question about music theory.
+ * @returns An async generator that yields chunks of the formatted explanation.
  */
-function findSignificantPeaks(spectrum: Float32Array, sampleRate: number): { freq: number; amp: number }[] {
-    const fftSize = spectrum.length * 2;
-    const peaks: { freq: number; amp: number, index: number }[] = [];
+export async function* getTheoryExplanation(query: string): AsyncGenerator<string> {
+    const prompt = `You are an expert music theory teacher with a passion for making complex topics simple and exciting. Your tone is encouraging, clear, and concise.
+Explain the following concept to a beginner musician.
 
-    // Find all local maxima above the threshold
-    for (let i = 1; i < spectrum.length - 1; i++) {
-        const amp = spectrum[i];
-        if (amp > PEAK_THRESHOLD_DB && amp > spectrum[i - 1] && amp > spectrum[i + 1]) {
-            peaks.push({
-                freq: i * (sampleRate / fftSize),
-                amp: amp,
-                index: i
-            });
+**Instructions:**
+1.  Start with a simple, one-sentence definition.
+2.  Use a simple analogy to help the user understand the core idea.
+3.  Break down the explanation into short, easy-to-read paragraphs.
+4.  Use Markdown for formatting:
+    *   \`**Key Term**\` for important vocabulary.
+    *   Use bullet points (-) for lists.
+5.  Embed SSML tags for a better audio experience:
+    *   \`<break time="400ms"/>\` after headings or between major points.
+    *   \`<prosody rate="slow">...</prosody>\` to emphasize short definitions.
+    *   Do NOT use the top-level <speak> tag.
+
+**User's Question:** "${query}"`;
+
+    try {
+        const responseStream = await ai.models.generateContentStream({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+
+        for await (const chunk of responseStream) {
+            yield chunk.text;
         }
+    } catch (e) {
+        console.error("Error getting theory explanation stream:", e);
+        throw new Error("The AI failed to provide an explanation. Please try again.");
     }
-
-    // Sort by amplitude (loudest first)
-    peaks.sort((a, b) => b.amp - a.amp);
-
-    // Filter out peaks that are too close to a louder peak (harmonics/noise)
-    const significantPeaks: { freq: number; amp: number }[] = [];
-    for (const peak of peaks) {
-        if (significantPeaks.every(p => Math.abs(p.freq - peak.freq) > MIN_PEAK_DISTANCE_HZ)) {
-            significantPeaks.push({ freq: peak.freq, amp: peak.amp });
-        }
-    }
-    
-    // Return top 15 most significant peaks, sorted by frequency
-    return significantPeaks.slice(0, 15).sort((a,b) => a.freq - b.freq);
 }
 
 
-export const analyzeChordFromSpectrum = async (
-    spectrum: Float32Array, 
-    sampleRate: number, 
-    settings: TuningSettings
-): Promise<ChordDetails | null> => {
-    
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/**
+ * Generates a rhythmic emphasis pattern using AI for the metronome.
+ */
+export const generateGroove = async (prompt: string, timeSignature: string): Promise<BeatEmphasis[]> => {
+    const { beatsPerMeasure } = parseTimeSignature(timeSignature);
+    const aiPrompt = `You are a rhythm expert. Create a rhythmic emphasis pattern for a musician to practice with.
+The user wants a "${prompt}" groove in ${timeSignature} time.
 
-    const peaks = findSignificantPeaks(spectrum, sampleRate);
-
-    if (peaks.length < 2) {
-        return null;
-    }
-
-    const peakData = peaks.map(p => ({ freq: Math.round(p.freq), amp: Math.round(p.amp) }));
-    
-    const prompt = `You are a music theory expert. Based on the following prominent musical frequencies and their relative amplitudes (in dB), identify the musical chord being played. The reference tuning is A4=${settings.a4} Hz. Determine the most likely chord name (e.g., "G Major", "Am7"). List the individual notes found, including their octave, and identify the bass note (the lowest frequency note). Respond only with the JSON object.
-
-Frequency Peaks:
-${JSON.stringify(peakData)}
-`;
+Respond with a JSON object containing a "pattern" array.
+The array must contain exactly ${beatsPerMeasure} strings.
+Each string must be one of the following values:
+- "accent": for a strong beat
+- "regular": for a standard beat
+- "silent": for a rest or silent beat`;
 
     const responseSchema = {
         type: Type.OBJECT,
         properties: {
-            chordName: {
-                type: Type.STRING,
-                description: 'The common name of the chord, e.g., "C Major" or "Am7".',
-            },
-            notes: {
+            pattern: {
                 type: Type.ARRAY,
-                description: 'An array of the individual notes detected in the chord.',
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: {
-                            type: Type.STRING,
-                            description: 'The note name (e.g., "C", "F#").',
-                        },
-                        octave: {
-                            type: Type.INTEGER,
-                            description: 'The octave number of the note.',
-                        },
-                        frequency: {
-                            type: Type.NUMBER,
-                            description: 'The detected frequency of the note in Hz.',
-                        },
-                        isBassNote: {
-                             type: Type.BOOLEAN,
-                             description: 'True if this is the lowest note in the chord.'
-                        }
-                    },
-                    required: ["name", "octave", "frequency", "isBassNote"]
-                },
+                description: `An array of beat emphasis strings of length ${beatsPerMeasure}.`,
+                items: { type: Type.STRING },
             },
         },
-        required: ["chordName", "notes"],
+        required: ['pattern'],
     };
 
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: prompt,
+            contents: aiPrompt,
             config: {
-              responseMimeType: "application/json",
-              responseSchema: responseSchema,
+                responseMimeType: "application/json",
+                responseSchema: responseSchema,
             },
         });
-
         const jsonText = response.text.trim();
-        const result = JSON.parse(jsonText) as { chordName: string, notes: Omit<ChordNote, 'cents'>[] };
+        const result = JSON.parse(jsonText) as { pattern: BeatEmphasis[] };
         
-        // Post-process to add cents calculation
-        const processedResult: ChordDetails = {
-            ...result,
-            notes: result.notes.map(note => {
-                const noteFloat = A4_MIDI + 12 * Math.log2(note.frequency / settings.a4);
-                const noteNumber = Math.round(noteFloat);
-                const cents = 100 * (noteFloat - noteNumber);
-
-                return {
-                    ...note,
-                    cents,
-                };
-            }),
-        };
-
-        return processedResult;
+        if (result.pattern && result.pattern.length === beatsPerMeasure) {
+            return result.pattern;
+        } else {
+            throw new Error("AI returned a pattern with an incorrect number of beats.");
+        }
     } catch (e) {
-        console.error("Error parsing Gemini response:", e);
-        throw new Error("The AI could not identify a valid chord from the audio.");
+        console.error("Error parsing groove response from Gemini:", e);
+        throw new Error("The AI failed to generate a valid groove. Please try a different prompt.");
     }
 };
 
 /**
- * Gets a music theory explanation from the AI.
- * @param query The user's question about music theory.
- * @returns A string containing the formatted explanation.
+ * Creates a structured practice plan using AI.
  */
-export const getTheoryExplanation = async (query: string): Promise<string> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    const prompt = `You are an expert music theory teacher. Your tone is encouraging, clear, and concise.
-Explain the following concept. Use Markdown for formatting:
-- Use headings (#, ##) for structure.
-- Use bold (**term**) for key terms.
-- Use lists (-) for examples or steps.
-- Keep the explanation focused and easy to understand for a musician.
+export const createPracticePlan = async (goal: string): Promise<PlanStep[]> => {
+    const prompt = `You are an expert music practice coach. A user wants a practice plan. Their goal is: "${goal}".
 
-Concept: "${query}"`;
+Create a structured JSON array of practice steps. Each step is an object with three properties: "module", "task", and "duration_seconds".
 
-    try {
+**Available Modules:**
+1.  **"Tuner"**: For tuning an instrument. The "task" should describe what to tune.
+2.  **"Metronome"**: For rhythmic exercises. The "task" describes the exercise (e.g., "Play C Major Scale").
+3.  **"Message"**: For instructions, breaks, or theory concepts. The "task" is the message to display.
+
+**Rules:**
+- A good plan should have at least 3 steps.
+- Start with a "Tuner" step if the goal involves an instrument.
+- Include a mix of technical exercises and musical application.
+- Durations should be reasonable.
+- For "Metronome" steps, you can optionally include a "config" object with properties like "bpm" and a "trainerConfig" object for auto-tempo increase.
+- The entire response must be ONLY the JSON array.
+
+**Example Response:**
+[
+  {"module": "Tuner", "task": "Tune guitar to Standard EADGBe", "duration_seconds": 120},
+  {"module": "Metronome", "task": "Warm-up: Chromatic scale, 4 notes per beat", "duration_seconds": 180, "config": {"bpm": 80}},
+  {"module": "Message", "task": "Take a 30-second break. Stretch your hands.", "duration_seconds": 30},
+  {"module": "Metronome", "task": "Practice the main riff of the song", "duration_seconds": 300, "config": {"bpm": 100, "trainerConfig": {"enabled": true, "bpmIncrease": 5, "barInterval": 8}}}
+]
+`;
+    const responseSchema = {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                module: { type: Type.STRING },
+                task: { type: Type.STRING },
+                duration_seconds: { type: Type.INTEGER },
+                config: { 
+                    type: Type.OBJECT,
+                    properties: {
+                        bpm: { type: Type.INTEGER },
+                        trainerConfig: {
+                            type: Type.OBJECT,
+                            properties: {
+                                enabled: { type: Type.BOOLEAN },
+                                bpmIncrease: { type: Type.INTEGER },
+                                barInterval: { type: Type.INTEGER }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: responseSchema,
+            }
         });
-
-        return response.text.trim();
+        const jsonText = response.text.trim();
+        const result = JSON.parse(jsonText);
+        return result as PlanStep[];
     } catch (e) {
-        console.error("Error getting theory explanation:", e);
-        throw new Error("The AI failed to provide an explanation. Please try again.");
+        console.error("Error parsing practice plan from Gemini:", e);
+        throw new Error("The AI failed to generate a valid practice plan. Please try again.");
     }
-};
+}

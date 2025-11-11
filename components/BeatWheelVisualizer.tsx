@@ -40,45 +40,51 @@ const BeatSegment: React.FC<{
 
     const startAngle = index * anglePerBeat;
     const endAngle = startAngle + anglePerBeat - gap;
-
-    const springProps = useSpring({
-        opacity: isActive ? 1 : (emphasis === 'silent' ? 0.4 : 0.8),
-        scale: isActive ? 1.1 : 1,
-        config: { tension: 400, friction: 20 }
+    
+    const animatedProps = useSpring({
+        transform: isActive && emphasis !== 'silent' ? 'scale(1.05)' : 'scale(1)',
+        filter: isActive && emphasis !== 'silent' ? 'drop-shadow(0 0 8px currentColor)' : 'drop-shadow(0 0 0px currentColor)',
+        config: { tension: 300, friction: 15 }
     });
     
-    let colorClass = 'stroke-slate-500 dark:stroke-gray-600';
+    let colorClass: string;
     let strokeDasharray = 'none';
     let strokeLinecap: 'round' | 'butt' = 'round';
-
+    let strokeWidth = emphasis === 'accent' ? 22 : 20;
+    
     if (isActive) {
         if (emphasis !== 'silent') {
-           colorClass = emphasis === 'accent' ? 'stroke-cyan-500 dark:stroke-cyan-400' : 'stroke-cyan-600 dark:stroke-cyan-500';
+           colorClass = emphasis === 'accent' ? 'stroke-indigo-500 dark:stroke-indigo-400' : 'stroke-teal-600 dark:stroke-teal-500';
+        } else {
+            colorClass = 'stroke-black/50 dark:stroke-white/50';
+            strokeDasharray = '1, 10';
+            strokeLinecap = 'butt';
         }
     } else {
         switch(emphasis) {
-            case 'accent': colorClass = 'stroke-cyan-500 dark:stroke-cyan-400'; break;
-            case 'regular': colorClass = 'stroke-slate-400 dark:stroke-gray-500'; break;
+            case 'accent': colorClass = 'stroke-indigo-500/50 dark:stroke-indigo-400/50'; break;
+            case 'regular': colorClass = 'stroke-black/30 dark:stroke-white/30'; break;
             case 'silent': 
-                colorClass = 'stroke-slate-400/50 dark:stroke-gray-700';
+                colorClass = 'stroke-black/50 dark:stroke-white/50';
                 strokeDasharray = '1, 10';
                 strokeLinecap = 'butt';
                 break;
+            default: colorClass = 'stroke-black/30 dark:stroke-white/30'; break;
         }
     }
+
 
     return (
         <animated.path
             d={describeArc(center, center, radius, startAngle, endAngle)}
-            className={`${colorClass} transition-colors duration-200`}
+            className={`${colorClass} transition-colors duration-100`}
             style={{
-                opacity: springProps.opacity,
                 transformOrigin: 'center center',
-                transform: springProps.scale.to(s => `scale(${s})`),
-                filter: isActive && emphasis !== 'silent' ? 'drop-shadow(0 0 8px currentColor)' : 'none',
+                transform: animatedProps.transform,
+                filter: animatedProps.filter,
             }}
             strokeDasharray={strokeDasharray}
-            strokeWidth="16"
+            strokeWidth={strokeWidth}
             strokeLinecap={strokeLinecap}
             fill="none"
         />
@@ -110,8 +116,8 @@ export const BeatWheelVisualizer: React.FC<BeatWheelVisualizerProps> = ({ beatsP
                 cx="100"
                 cy="100"
                 r="85"
-                className="stroke-slate-400/30 dark:stroke-black/20"
-                strokeWidth="16"
+                className="stroke-slate-200 dark:stroke-black/20"
+                strokeWidth="20"
                 fill="none"
             />
             {segments}
